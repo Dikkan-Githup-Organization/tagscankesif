@@ -34,7 +34,7 @@ python kesif_app.py
 |---|---|---|
 | `api_url` | tag-scan-api adresi (sonunda `/` yok) | `http://172.16.49.2:5090` |
 | `api_token` | Sunucu `config.json` `api.token` ile aynı (boş = token yok) | `""` |
-| `rssi_esigi` | Bundan güçlü (≥) görülen cihazlar keşfe gider. 0'a yakın = daha yakın olmalı | `-60` |
+| `rssi_esigi` | Bundan güçlü (≥) görülen cihazlar keşfe gider. 0'a yakın = daha yakın olmalı | `-100` |
 | `tarama_sn` | Her BLE tarama turu süresi | `6` |
 | `kayit_modu_poll_sn` | Kayıt modu bayrağını yoklama aralığı | `10` |
 | `sadece_kayit_modunda` | `true`: kayıt modu kapalıyken keşif göndermez | `true` |
