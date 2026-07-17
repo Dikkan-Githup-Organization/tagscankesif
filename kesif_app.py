@@ -42,6 +42,7 @@ CONFIG_YOLU = os.path.join(KOK, "config.json")
 # DIKKAT: 0x2A06 hem Link Loss (1803) hem Immediate Alert (1802)'de var; DOGRU
 # servisin (1802) karakteristigini secmek gerek.
 IAS_SERVICE = "00001802-0000-1000-8000-00805f9b34fb"
+LINK_LOSS_SERVICE = "00001803-0000-1000-8000-00805f9b34fb"
 IAS_ALERT_LEVEL = "00002a06-0000-1000-8000-00805f9b34fb"
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
 FIRMWARE_REV = "00002a26-0000-1000-8000-00805f9b34fb"
@@ -188,15 +189,35 @@ class KesifUygulamasi:
         bilgi = {}
         async with BleakClient(dev) as client:
             beep_char = None
+            link_loss_char = None
             for service in client.services:
-                if service.uuid.lower() != IAS_SERVICE:
+                service_uuid = service.uuid.lower()
+                if service_uuid not in (IAS_SERVICE, LINK_LOSS_SERVICE):
                     continue
                 for char in service.characteristics:
                     if char.uuid.lower() == IAS_ALERT_LEVEL:
-                        beep_char = char
+                        if service_uuid == IAS_SERVICE:
+                            beep_char = char
+                        else:
+                            link_loss_char = char
                         break
             if beep_char is None:
                 return False, "Tag öttürme (Immediate Alert) desteklemiyor.", {}
+
+            # Link Loss seviyesi bağlantıya özeldir. Cihaz disconnect'i kayıp olarak
+            # yorumlamadan önce No Alert'i onaylı bir GATT yazımıyla ayarla.
+            if link_loss_char is not None:
+                try:
+                    await client.write_gatt_char(
+                        link_loss_char, bytearray([0x00]), response=True
+                    )
+                    seviye = await client.read_gatt_char(link_loss_char)
+                    if not seviye or seviye[0] != 0x00:
+                        print(f"[UYARI] Link Loss No Alert doğrulanamadı ({mac})")
+                except Exception as e:  # noqa: BLE001
+                    print(f"[UYARI] Link Loss başlangıçta susturulamadı ({mac}): {e}")
+            else:
+                print(f"[UYARI] Tag Link Loss servisi sunmuyor ({mac})")
 
             await client.write_gatt_char(beep_char, bytearray([0x02]), response=False)
             await asyncio.sleep(self.ottur_saniye)
@@ -204,6 +225,16 @@ class KesifUygulamasi:
                 await client.write_gatt_char(beep_char, bytearray([0x00]), response=False)
             except Exception:
                 pass
+
+            # 0x2A06 iki serviste de bulunabilir. Disconnect alarmını kapatmak için
+            # yalnız Link Loss (0x1803) altındaki karakteristiğe No Alert yaz.
+            if link_loss_char is not None:
+                try:
+                    await client.write_gatt_char(
+                        link_loss_char, bytearray([0x00]), response=True
+                    )
+                except Exception as e:  # noqa: BLE001
+                    print(f"[UYARI] Link Loss susturulamadı ({mac}): {e}")
 
             # Aynı bağlantıda bedava bilgi oku
             for anahtar, uuid in (("pil", BATTERY_LEVEL), ("firmware", FIRMWARE_REV),
