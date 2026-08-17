@@ -115,12 +115,27 @@ class KesifUygulamasi:
             print(f"[UYARI] kayıt modu sorgulanamadı: {e}")
         return self._kayit_modu
 
-    def kesif_gonder(self, mac, rssi, ad):
-        """Bilinmeyen MAC'i sunucuya bildirir (cooldown'lu)."""
+    def odak_mac_al(self):
+        """Sunucuda açık bir 'Bul' popup'ı var mı? (varsa hedef MAC döner, yoksa None)."""
+        try:
+            r = requests.get(f"{self.api_url}/api/v1/kesif/odak",
+                              headers=self._basliklar, timeout=4)
+            if r.ok:
+                return (r.json().get("mac") or "").strip() or None
+        except requests.RequestException as e:
+            print(f"[UYARI] odak hedefi sorgulanamadı: {e}")
+        return None
+
+    def kesif_gonder(self, mac, rssi, ad, atlama=False):
+        """Bilinmeyen MAC'i sunucuya bildirir (cooldown'lu).
+
+        atlama=True: 'Bul' odağı bu MAC'e kilitliyken cooldown'u bypass eder -
+        popup saniyede bir tazelensin diye her turda gönderilir."""
         simdi = time.monotonic()
-        son = self._son_gonderim.get(mac)
-        if son is not None and simdi - son < self.cooldown_sn:
-            return False
+        if not atlama:
+            son = self._son_gonderim.get(mac)
+            if son is not None and simdi - son < self.cooldown_sn:
+                return False
         self._son_gonderim[mac] = simdi
 
         govde = {"mac": mac, "rssi": rssi, "ad": ad or "", "kaynak": "pc-kesif"}
@@ -281,7 +296,18 @@ class KesifUygulamasi:
                     self.kayit_modu_acik()
                     self._kayit_yoklandi = simdi
 
-                # 3) Keşif taraması (kayıt modu açıksa); değilse öttür için kısa bekle
+                # 3) 'Bul' odağı — kayıt modundan bağımsız, panelde popup açıksa
+                # SADECE o MAC'i ~1sn'lik turlarla tarar (genel keşif bu turlarda durur)
+                odak_mac = self.odak_mac_al()
+                if odak_mac:
+                    bulunan = await BleakScanner.discover(timeout=1.0, return_adv=True)
+                    for addr, (dev, adv) in bulunan.items():
+                        if addr.upper() == odak_mac.upper() and adv.rssi is not None:
+                            ad = (dev.name or "").strip()[:60]
+                            self.kesif_gonder(addr.upper(), adv.rssi, ad, atlama=True)
+                    continue
+
+                # 4) Keşif taraması (kayıt modu açıksa); değilse öttür için kısa bekle
                 if self.sadece_kayit and not self._kayit_modu:
                     await asyncio.sleep(self.ottur_poll_sn)
                     continue
